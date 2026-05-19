@@ -1,105 +1,134 @@
-import { useFocusEffect } from 'expo-router';
-import React, { useState, useCallback, useRef } from 'react';
-import {
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  Alert,
-  RefreshControl,
-  View,
-  ActivityIndicator,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import { getAllSalesPaginated, deleteSale } from '@/services/sales';
-import { Sale } from '@/types/sale';
 import { useThemeColor } from '@/hooks/use-theme-color';
+import {
+  deleteVenta,
+    getListadoVentas,
+    VentaListado,
+    VentasFiltroTipo,
+    VentasQueryParams,
+} from '@/services/ventas';
+import { Ionicons } from '@expo/vector-icons';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import { Picker } from '@react-native-picker/picker';
+import { useFocusEffect, useRouter } from 'expo-router';
+import React, { useCallback, useState } from 'react';
+import {
+    Alert,
+    Platform,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    TouchableOpacity,
+    View
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-const PAGE_SIZE = 30;
+type FilterValue = '' | VentasFiltroTipo;
 
 export default function VentasScreen() {
-  const [sales, setSales] = useState<Sale[]>([]);
+  const [sales, setSales] = useState<VentaListado[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
-  const currentPageRef = useRef(0);
+  const [filterType, setFilterType] = useState<FilterValue>('');
+  const [startDate, setStartDate] = useState<Date>(new Date());
+  const [endDate, setEndDate] = useState<Date>(new Date());
+  const [showStartDatePicker, setShowStartDatePicker] = useState(false);
+  const [showEndDatePicker, setShowEndDatePicker] = useState(false);
+
   const router = useRouter();
   const textColor = useThemeColor({}, 'text');
   const tintColor = useThemeColor({}, 'tint');
 
-  const loadSales = useCallback(async (reset: boolean = false) => {
-    try {
-      if (reset) {
-        setIsLoading(true);
-        currentPageRef.current = 0;
-        setSales([]);
-        setHasMore(true);
-      } else {
-        setLoadingMore(true);
-      }
+  const formatDateForQuery = (date: Date): string => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
 
-      const offset = reset ? 0 : currentPageRef.current * PAGE_SIZE;
-      const result = await getAllSalesPaginated(PAGE_SIZE, offset);
-
-      if (reset) {
-        setSales(result.sales);
-      } else {
-        setSales((prevSales) => [...prevSales, ...result.sales]);
-      }
-
-      setHasMore(result.sales.length === PAGE_SIZE);
-      currentPageRef.current = reset ? 1 : currentPageRef.current + 1;
-    } catch (error) {
-      console.error('Error al cargar ventas:', error);
-      Alert.alert('Error', 'No se pudieron cargar las ventas');
-    } finally {
-      setIsLoading(false);
-      setLoadingMore(false);
-      setRefreshing(false);
+  const getQueryParams = (type: FilterValue): VentasQueryParams | undefined => {
+    if (!type) {
+      return undefined;
     }
-  }, []);
+
+    if (type !== 'rango') {
+      return { tipo: type };
+    }
+
+    return {
+      tipo: 'rango',
+      fechaInicio: formatDateForQuery(startDate),
+      fechaFin: formatDateForQuery(endDate),
+    };
+  };
+
+  const loadSales = useCallback(
+    async (type: FilterValue, isRefresh: boolean = false) => {
+      try {
+        if (!isRefresh) {
+          setIsLoading(true);
+        }
+
+        const data = await getListadoVentas(getQueryParams(type));
+        setSales(data);
+      } catch (error) {
+        console.error('Error al cargar ventas:', error);
+        Alert.alert('Error', 'No se pudieron cargar las ventas');
+      } finally {
+        setIsLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [startDate, endDate]
+  );
 
   useFocusEffect(
     useCallback(() => {
-      loadSales(true);
-    }, [loadSales])
+      loadSales(filterType);
+    }, [loadSales, filterType])
   );
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    loadSales(true);
-  }, [loadSales]);
+    loadSales(filterType, true);
+  }, [loadSales, filterType]);
 
-  const loadMore = useCallback(() => {
-    if (!loadingMore && hasMore) {
-      loadSales(false);
+  const handleFilterChange = (value: FilterValue) => {
+    setFilterType(value);
+
+    if (value === '' || value === 'dia' || value === 'semana' || value === 'mes') {
+      loadSales(value);
     }
-  }, [loadingMore, hasMore, loadSales]);
+  };
 
-  const handleDelete = (sale: Sale) => {
-    Alert.alert(
-      'Eliminar venta',
-      '¿Estás seguro de eliminar esta venta?',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Eliminar',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteSale(sale.id);
-              loadSales(true);
-            } catch (error) {
-              Alert.alert('Error', 'No se pudo eliminar la venta');
-            }
-          },
-        },
-      ]
-    );
+  const handleApplyRange = () => {
+    if (startDate > endDate) {
+      Alert.alert('Error', 'La fecha inicial no puede ser mayor que la fecha final');
+      return;
+    }
+
+    loadSales('rango');
+  };
+
+  const onStartDateChange = (event: any, selectedDate?: Date) => {
+    if (Platform.OS === 'android') {
+      setShowStartDatePicker(false);
+    }
+
+    if (selectedDate) {
+      setStartDate(selectedDate);
+    }
+  };
+
+  const onEndDateChange = (event: any, selectedDate?: Date) => {
+    if (Platform.OS === 'android') {
+      setShowEndDatePicker(false);
+    }
+
+    if (selectedDate) {
+      setEndDate(selectedDate);
+    }
   };
 
   const formatPrice = (price: number) => {
@@ -116,6 +145,42 @@ export default function VentasScreen() {
       month: '2-digit',
       year: 'numeric',
     }).format(date);
+  };
+
+  const formatDateInput = (date: Date) => {
+    return new Intl.DateTimeFormat('es-ES', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    }).format(date);
+  };
+
+  const goToDetail = (saleId: number) => {
+    router.push(`/(drawer)/ventas/detalle?id=${saleId}`);
+  };
+
+  const handleDeleteSale = (sale: VentaListado) => {
+    Alert.alert(
+      'Eliminar venta',
+      `¿Estás seguro de eliminar la venta ${sale.numero}?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Eliminar',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteVenta(sale.id);
+              await loadSales(filterType, true);
+              Alert.alert('Éxito', 'Venta eliminada correctamente');
+            } catch (error: any) {
+              const message = error?.message || 'No se pudo eliminar la venta';
+              Alert.alert('Error', message);
+            }
+          },
+        },
+      ]
+    );
   };
 
   if (isLoading) {
@@ -141,29 +206,77 @@ export default function VentasScreen() {
           </TouchableOpacity>
         </ThemedView>
 
+        <ThemedView style={styles.filterContainer}>
+          <ThemedText style={styles.filterLabel}>Filtro:</ThemedText>
+          <View style={styles.pickerContainer}>
+            <Picker
+              selectedValue={filterType}
+              onValueChange={handleFilterChange}
+              style={{ color: textColor }}>
+              <Picker.Item label="Sin filtro" value="" />
+              <Picker.Item label="Día" value="dia" />
+              <Picker.Item label="Semana" value="semana" />
+              <Picker.Item label="Mes" value="mes" />
+              <Picker.Item label="Rango de fechas" value="rango" />
+            </Picker>
+          </View>
+
+          {filterType === 'rango' && (
+            <>
+              <View style={styles.dateRangeContainer}>
+                <View style={styles.dateInputContainer}>
+                  <ThemedText style={styles.dateLabel}>Desde:</ThemedText>
+                  <TouchableOpacity style={styles.dateButton} onPress={() => setShowStartDatePicker(true)}>
+                    <ThemedText>{formatDateInput(startDate)}</ThemedText>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.dateInputContainer}>
+                  <ThemedText style={styles.dateLabel}>Hasta:</ThemedText>
+                  <TouchableOpacity style={styles.dateButton} onPress={() => setShowEndDatePicker(true)}>
+                    <ThemedText>{formatDateInput(endDate)}</ThemedText>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={[styles.applyButton, { backgroundColor: tintColor }]}
+                onPress={handleApplyRange}>
+                <ThemedText style={styles.applyButtonText}>Aplicar rango</ThemedText>
+              </TouchableOpacity>
+            </>
+          )}
+        </ThemedView>
+
+        {showStartDatePicker && (
+          <DateTimePicker
+            value={startDate}
+            mode="date"
+            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+            onChange={onStartDateChange}
+            maximumDate={endDate}
+          />
+        )}
+
+        {showEndDatePicker && (
+          <DateTimePicker
+            value={endDate}
+            mode="date"
+            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+            onChange={onEndDateChange}
+            minimumDate={startDate}
+            maximumDate={new Date()}
+          />
+        )}
+
         <ScrollView
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-          }
-          onScroll={({ nativeEvent }) => {
-            const { layoutMeasurement, contentOffset, contentSize } = nativeEvent;
-            const paddingToBottom = 20;
-            if (
-              layoutMeasurement.height + contentOffset.y >=
-              contentSize.height - paddingToBottom
-            ) {
-              loadMore();
-            }
-          }}
-          scrollEventThrottle={400}>
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
           {sales.length === 0 ? (
             <ThemedView style={styles.emptyContainer}>
               <Ionicons name="cart-outline" size={64} color={textColor} style={{ opacity: 0.5 }} />
-              <ThemedText style={styles.emptyText}>
-                No hay ventas registradas
-              </ThemedText>
+              <ThemedText style={styles.emptyText}>No hay ventas registradas</ThemedText>
               <TouchableOpacity
                 style={[styles.addButton, { backgroundColor: tintColor, marginTop: 16 }]}
                 onPress={() => router.push('/(drawer)/ventas/nuevo')}>
@@ -172,58 +285,42 @@ export default function VentasScreen() {
               </TouchableOpacity>
             </ThemedView>
           ) : (
-            <>
-              {sales.map((sale) => (
-                <ThemedView key={sale.id} style={styles.saleCard}>
-                  <ThemedView style={styles.saleInfo}>
-                    <ThemedView style={styles.saleHeader}>
-                      <ThemedText type="subtitle" style={styles.saleId}>
-                        Venta #{sale.id}
-                      </ThemedText>
-                      <ThemedText style={styles.saleDate}>
-                        {formatDate(sale.sale_date || sale.created_at)}
-                      </ThemedText>
-                    </ThemedView>
-                    <ThemedText style={styles.saleDetail}>
-                      Cantidad: {sale.quantity} | Precio unitario: {formatPrice(sale.price_real)}
-                    </ThemedText>
-                    {sale.tipo_pago_name && (
-                      <ThemedText style={styles.salePaymentType}>
-                        Tipo de pago: {sale.tipo_pago_name}
-                      </ThemedText>
-                    )}
-                    <ThemedText style={[styles.saleTotal, { color: tintColor }]}>
-                      Total: {formatPrice(sale.total_price)}
-                    </ThemedText>
-                  </ThemedView>
-                  <ThemedView style={styles.saleActions}>
+            sales.map((sale) => (
+              <TouchableOpacity
+                key={sale.id}
+                activeOpacity={0.9}
+                onPress={() => goToDetail(sale.id)}
+                style={styles.saleCard}>
+                <ThemedView style={styles.saleHeader}>
+                  <ThemedText type="subtitle" style={styles.saleNumber}>
+                    {sale.numero} (#{sale.id})
+                  </ThemedText>
+                  <View style={styles.saleHeaderRight}>
+                    <ThemedText style={styles.saleDate}>{formatDate(sale.fecha)}</ThemedText>
                     <TouchableOpacity
-                      style={styles.actionButton}
-                      onPress={() => router.push(`/(drawer)/ventas/editar?id=${sale.id}`)}>
-                      <Ionicons name="pencil-outline" size={20} color={tintColor} />
+                      onPress={() => goToDetail(sale.id)}
+                      style={styles.viewButton}
+                      accessibilityLabel="Ver detalle de venta">
+                      <Ionicons name="eye-outline" size={18} color={tintColor} />
                     </TouchableOpacity>
                     <TouchableOpacity
-                      style={styles.actionButton}
-                      onPress={() => handleDelete(sale)}>
-                      <Ionicons name="trash-outline" size={20} color="#FF3B30" />
+                      onPress={() => handleDeleteSale(sale)}
+                      style={styles.deleteButton}
+                      accessibilityLabel="Eliminar venta">
+                      <Ionicons name="trash-outline" size={18} color="#FF3B30" />
                     </TouchableOpacity>
-                  </ThemedView>
+                  </View>
                 </ThemedView>
-              ))}
 
-              {loadingMore && (
-                <ThemedView style={styles.loadingMoreContainer}>
-                  <ActivityIndicator size="small" color={tintColor} />
-                  <ThemedText style={styles.loadingMoreText}>Cargando más...</ThemedText>
-                </ThemedView>
-              )}
-
-              {!hasMore && sales.length > 0 && (
-                <ThemedView style={styles.endContainer}>
-                  <ThemedText style={styles.endText}>No hay más ventas</ThemedText>
-                </ThemedView>
-              )}
-            </>
+                <ThemedText style={styles.saleDetail}>Items: {sale.cantidadItems}</ThemedText>
+                <ThemedText style={styles.saleDetail}>Bruto: {formatPrice(sale.totalBruto)}</ThemedText>
+                <ThemedText style={styles.saleDetail}>Descuento: {formatPrice(sale.totalDescuento)}</ThemedText>
+                <ThemedText style={styles.saleDetail}>Pagado: {formatPrice(sale.totalPagado)}</ThemedText>
+                <ThemedText style={[styles.saleTotal, { color: tintColor }]}>
+                  Neto: {formatPrice(sale.totalNeto)}
+                </ThemedText>
+              </TouchableOpacity>
+            ))
           )}
         </ScrollView>
       </ThemedView>
@@ -257,6 +354,55 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '600',
   },
+  filterContainer: {
+    marginHorizontal: 16,
+    marginBottom: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.1)',
+    borderRadius: 12,
+  },
+  filterLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  pickerContainer: {
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.12)',
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  dateRangeContainer: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 12,
+  },
+  dateInputContainer: {
+    flex: 1,
+    gap: 6,
+  },
+  dateLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  dateButton: {
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.12)',
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+  },
+  applyButton: {
+    marginTop: 12,
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  applyButtonText: {
+    color: '#fff',
+    fontWeight: '700',
+  },
   scrollView: {
     flex: 1,
   },
@@ -277,9 +423,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   saleCard: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
     padding: 16,
     marginHorizontal: 16,
     marginVertical: 8,
@@ -287,74 +430,50 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(0,0,0,0.1)',
   },
-  saleInfo: {
-    flex: 1,
-  },
   saleHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 8,
   },
-  saleId: {
-    fontSize: 18,
-    fontWeight: '600',
+  saleHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  saleNumber: {
+    fontSize: 17,
+    fontWeight: '700',
   },
   saleDate: {
     fontSize: 13,
     opacity: 0.7,
-    fontWeight: '500',
+  },
+  viewButton: {
+    padding: 6,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.15)',
+  },
+  deleteButton: {
+    padding: 6,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,59,48,0.35)',
   },
   saleDetail: {
     fontSize: 14,
-    opacity: 0.7,
-    marginBottom: 4,
-  },
-  salePaymentType: {
-    fontSize: 13,
-    opacity: 0.7,
-    marginBottom: 4,
-    fontStyle: 'italic',
+    opacity: 0.75,
+    marginBottom: 2,
   },
   saleTotal: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginTop: 4,
-  },
-  saleActions: {
-    flexDirection: 'column',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 8,
-  },
-  actionButton: {
-    padding: 8,
-    minWidth: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
+    marginTop: 8,
+    fontSize: 17,
+    fontWeight: '700',
   },
   loadingText: {
     textAlign: 'center',
     marginTop: 40,
     fontSize: 16,
-  },
-  loadingMoreContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-    gap: 8,
-  },
-  loadingMoreText: {
-    fontSize: 14,
-    opacity: 0.7,
-  },
-  endContainer: {
-    padding: 20,
-    alignItems: 'center',
-  },
-  endText: {
-    fontSize: 14,
-    opacity: 0.5,
   },
 });

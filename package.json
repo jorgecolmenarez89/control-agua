@@ -19,6 +19,7 @@
     "@react-navigation/drawer": "^7.7.3",
     "@react-navigation/elements": "^2.6.3",
     "@react-navigation/native": "^7.1.8",
+    "axios": "^1.16.1",
     "expo": "~54.0.25",
     "expo-constants": "~18.0.10",
     "expo-file-system": "^19.0.19",
@@ -42,7 +43,8 @@
     "react-native-safe-area-context": "~5.6.0",
     "react-native-screens": "~4.16.0",
     "react-native-web": "~0.21.0",
-    "react-native-worklets": "0.5.1"
+    "react-native-worklets": "0.5.1",
+    "zustand": "^5.0.13"
   },
   "devDependencies": {
     "@types/react": "~19.1.0",

@@ -1,5 +1,5 @@
-import * as SQLite from 'expo-sqlite';
 import * as FileSystem from 'expo-file-system';
+import * as SQLite from 'expo-sqlite';
 
 // Abrir o crear la base de datos
 let db: SQLite.SQLiteDatabase | null = null;
@@ -71,18 +71,6 @@ export const initDatabase = (): Promise<void> => {
           CHECK (id = 1)
         );
       `);
-
-      // Insertar registro inicial de empresa si no existe
-      try {
-        const empresaExists = database.getAllSync('SELECT * FROM empresa WHERE id = 1');
-        if (empresaExists.length === 0) {
-          database.execSync(`
-            INSERT INTO empresa (id, name) VALUES (1, 'Mi Empresa');
-          `);
-        }
-      } catch (error) {
-        // Ignorar error si ya existe
-      }
 
       // Tabla de productos
       database.execSync(`

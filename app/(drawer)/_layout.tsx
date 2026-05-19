@@ -1,13 +1,12 @@
-import { Drawer } from 'expo-router/drawer';
-import { useRouter } from 'expo-router';
-import { TouchableOpacity, View, StyleSheet, Alert } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
-import { useAuth } from '@/contexts/AuthContext';
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
+import { useAuth } from '@/contexts/AuthContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useThemeColor } from '@/hooks/use-theme-color';
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+import { Drawer } from 'expo-router/drawer';
+import { Alert, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function DrawerLayout() {
   const router = useRouter();
@@ -15,6 +14,9 @@ export default function DrawerLayout() {
   const colorScheme = useColorScheme();
   const textColor = useThemeColor({}, 'text');
   const backgroundColor = useThemeColor({}, 'background');
+
+  const roleName = user?.rol?.nombre?.trim().toLowerCase();
+  const isAdmin = user?.id_rol === 1 || roleName === 'administrador';
 
   const handleLogout = () => {
     Alert.alert(
@@ -52,14 +54,24 @@ export default function DrawerLayout() {
         headerTintColor: textColor,
       }}
       drawerContent={(props) => {
+        const hiddenRoutes = new Set([
+          'cerrar-sesion',
+          'productos/nuevo',
+          'productos/editar',
+          'ventas/nuevo',
+          'ventas/editar',
+          'ventas/detalle',
+        ]);
+
+        const allowedRoutes = isAdmin
+          ? new Set(['home', 'ventas', 'reportes', 'configuracion', 'productos'])
+          : new Set(['home', 'ventas']);
+
         const routes = props.state.routes.filter(
-          route => 
-            route.name !== 'cerrar-sesion' &&
-            route.name !== 'productos/nuevo' &&
-            route.name !== 'productos/editar' &&
-            route.name !== 'ventas/nuevo' &&
-            route.name !== 'ventas/editar'
+          (route) => !hiddenRoutes.has(route.name) && allowedRoutes.has(route.name)
         );
+
+        const focusedRouteKey = props.state.routes[props.state.index]?.key;
         
         return (
           <SafeAreaView style={[styles.drawerContent, { backgroundColor }]} edges={['bottom']}>
@@ -69,14 +81,14 @@ export default function DrawerLayout() {
               </ThemedText>
               {user && (
                 <ThemedText style={styles.drawerSubtitle}>
-                  {user.fullnames}
+                  {user.correo}
                 </ThemedText>
               )}
             </View>
 
             <View style={styles.drawerItems}>
               {routes.map((route, index) => {
-                const isFocused = props.state.index === index;
+                const isFocused = route.key === focusedRouteKey;
                 const iconName = getIconName(route.name);
                 const label = getLabel(route.name);
 
@@ -151,16 +163,6 @@ export default function DrawerLayout() {
         }}
       />
       <Drawer.Screen
-        name="compras"
-        options={{
-          title: 'Compras',
-          drawerLabel: 'Compras',
-          drawerIcon: ({ color, size }) => (
-            <Ionicons name="bag-outline" size={size} color={color} />
-          ),
-        }}
-      />
-      <Drawer.Screen
         name="reportes"
         options={{
           title: 'Reportes',
@@ -209,6 +211,13 @@ export default function DrawerLayout() {
         }}
       />
       <Drawer.Screen
+        name="ventas/detalle"
+        options={{
+          title: 'Detalle de Venta',
+          drawerItemStyle: { display: 'none' },
+        }}
+      />
+      <Drawer.Screen
         name="cerrar-sesion"
         options={{
           title: 'Cerrar sesión',
@@ -220,12 +229,11 @@ export default function DrawerLayout() {
   );
 }
 
-function getIconName(routeName: string): string {
-  const icons: { [key: string]: string } = {
+function getIconName(routeName: string): keyof typeof Ionicons.glyphMap {
+  const icons: Record<string, keyof typeof Ionicons.glyphMap> = {
     home: 'home-outline',
     productos: 'cube-outline',
     ventas: 'cart-outline',
-    compras: 'bag-outline',
     reportes: 'document-text-outline',
     configuracion: 'settings-outline',
   };
@@ -237,7 +245,6 @@ function getLabel(routeName: string): string {
     home: 'Home',
     productos: 'Productos',
     ventas: 'Ventas',
-    compras: 'Compras',
     reportes: 'Reportes',
     configuracion: 'Configuración',
   };

@@ -1,106 +1,103 @@
-import { executeQuery } from './database';
+import api from './api';
+
+interface EmpresaApi {
+  id?: number;
+  nombre: string;
+  rif: string | null;
+  direccion: string | null;
+  telefono: string | null;
+  descripcion: string | null;
+}
 
 export interface Empresa {
-  id: number;
-  name: string | null;
+  id?: number;
+  nombre: string;
   rif: string | null;
-  address: string | null;
-  phone: string | null;
-  email: string | null;
-  website: string | null;
-  description: string | null;
-  updated_at: string;
+  direccion: string | null;
+  telefono: string | null;
+  descripcion: string | null;
+}
+
+export interface CreateEmpresa {
+  nombre: string;
+  rif?: string | null;
+  direccion?: string | null;
+  telefono?: string | null;
+  descripcion?: string | null;
 }
 
 export interface UpdateEmpresa {
-  name?: string | null;
+  nombre?: string | null;
   rif?: string | null;
-  address?: string | null;
-  phone?: string | null;
-  email?: string | null;
-  website?: string | null;
-  description?: string | null;
+  direccion?: string | null;
+  telefono?: string | null;
+  descripcion?: string | null;
 }
 
+const normalizeEmpresa = (data: EmpresaApi): Empresa => {
+  return {
+    id: data.id,
+    nombre: data.nombre || '',
+    rif: data.rif ?? null,
+    direccion: data.direccion ?? null,
+    telefono: data.telefono ?? null,
+    descripcion: data.descripcion ?? null,
+  };
+};
+
 /**
- * Obtiene la información de la empresa
+ * Obtiene la empresa única del sistema tomando el primer elemento del endpoint.
  */
 export const getEmpresa = async (): Promise<Empresa | null> => {
-  try {
-    const result = await executeQuery('SELECT * FROM empresa WHERE id = 1');
-    
-    if (result.rows.length === 0) {
+  const response = await api.get<EmpresaApi[] | EmpresaApi>('/empresas');
+  const data = response.data;
+
+  if (Array.isArray(data)) {
+    if (data.length === 0) {
       return null;
     }
-    
-    return result.rows.item(0);
-  } catch (error) {
-    console.error('Error al obtener información de empresa:', error);
-    throw error;
+
+    return normalizeEmpresa(data[0]);
   }
+
+  if (!data) {
+    return null;
+  }
+
+  return normalizeEmpresa(data);
 };
 
 /**
- * Actualiza la información de la empresa
+ * Crea la empresa única del sistema
  */
-export const updateEmpresa = async (data: UpdateEmpresa): Promise<Empresa> => {
-  try {
-    const updates: string[] = [];
-    const values: any[] = [];
-    
-    if (data.name !== undefined) {
-      updates.push('name = ?');
-      values.push(data.name);
-    }
-    if (data.rif !== undefined) {
-      updates.push('rif = ?');
-      values.push(data.rif);
-    }
-    if (data.address !== undefined) {
-      updates.push('address = ?');
-      values.push(data.address);
-    }
-    if (data.phone !== undefined) {
-      updates.push('phone = ?');
-      values.push(data.phone);
-    }
-    if (data.email !== undefined) {
-      updates.push('email = ?');
-      values.push(data.email);
-    }
-    if (data.website !== undefined) {
-      updates.push('website = ?');
-      values.push(data.website);
-    }
-    if (data.description !== undefined) {
-      updates.push('description = ?');
-      values.push(data.description);
-    }
-    
-    if (updates.length === 0) {
-      const empresa = await getEmpresa();
-      if (!empresa) {
-        throw new Error('No se pudo obtener la información de la empresa');
-      }
-      return empresa;
-    }
-    
-    updates.push('updated_at = CURRENT_TIMESTAMP');
-    
-    await executeQuery(
-      `UPDATE empresa SET ${updates.join(', ')} WHERE id = 1`,
-      values
-    );
-    
-    const updatedEmpresa = await getEmpresa();
-    if (!updatedEmpresa) {
-      throw new Error('Empresa actualizada pero no se pudo obtener');
-    }
-    
-    return updatedEmpresa;
-  } catch (error) {
-    console.error('Error al actualizar información de empresa:', error);
-    throw error;
-  }
+export const createEmpresa = async (data: CreateEmpresa): Promise<Empresa> => {
+  const payload = {
+    nombre: data.nombre.trim(),
+    rif: data.rif ?? null,
+    direccion: data.direccion ?? null,
+    telefono: data.telefono ?? null,
+    descripcion: data.descripcion ?? null,
+  };
+
+  const response = await api.post<EmpresaApi>('/empresas', payload);
+  return normalizeEmpresa(response.data);
 };
 
+/**
+ * Actualiza la empresa única del sistema
+ */
+export const updateEmpresa = async (
+  empresaId: number,
+  data: UpdateEmpresa
+): Promise<Empresa> => {
+  const payload = {
+    nombre: data.nombre ?? null,
+    rif: data.rif ?? null,
+    direccion: data.direccion ?? null,
+    telefono: data.telefono ?? null,
+    descripcion: data.descripcion ?? null,
+  };
+
+  const response = await api.put<EmpresaApi>(`/empresas/${empresaId}`, payload);
+  return normalizeEmpresa(response.data);
+};

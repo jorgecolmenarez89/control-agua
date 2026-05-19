@@ -1,159 +1,67 @@
-import { executeQuery } from './database';
-import { User } from '@/types/user';
-import { UserSession } from './sessionStorage';
+import api, { rawApi } from '@/services/api';
+import { LoginResponse, RefreshResponse, TokenStatusResponse } from '@/types/auth';
 
 export interface LoginCredentials {
-  username: string;
-  password: string;
+  correo: string;
+  contrasena: string;
 }
 
-export interface RegisterCredentials {
-  username: string;
-  password: string;
-  fullnames: string;
-}
+export const login = async (credentials: LoginCredentials): Promise<LoginResponse> => {
+  const { correo, contrasena } = credentials;
 
-export interface AuthResult {
-  success: boolean;
-  user?: UserSession['userData'];
-  token?: string;
-  userId?: string;
-  error?: string;
-}
+  const response = await api.post<LoginResponse>('/auth/login', {
+    correo: correo.trim(),
+    contrasena: contrasena.trim(),
+  });
 
-/**
- * Inicia sesión con un usuario existente
- */
-export const login = async (credentials: LoginCredentials): Promise<AuthResult> => {
+  return response.data;
+};
+
+export const validateToken = async (token: string): Promise<boolean> => {
+  if (!token?.trim()) {
+    return false;
+  }
+
   try {
-    const { username, password } = credentials;
-
-    if (!username.trim() || !password.trim()) {
-      return {
-        success: false,
-        error: 'Por favor completa todos los campos',
-      };
-    }
-
-    // Buscar usuario en la base de datos
-    const result = await executeQuery(
-      'SELECT * FROM users WHERE username = ? LIMIT 1',
-      [username.trim()]
-    );
-
-    if (result.rows.length === 0) {
-      return {
-        success: false,
-        error: 'Usuario no encontrado',
-      };
-    }
-
-    // Usuario existe, verificar contraseña
-    const user: User = result.rows.item(0);
-
-    if (user.password !== password.trim()) {
-      return {
-        success: false,
-        error: 'Contraseña incorrecta',
-      };
-    }
-
-    // Contraseña correcta, generar token y retornar datos del usuario
-    const token = `token_${user.id}_${Date.now()}`;
-    const userId = user.id.toString();
-
-    return {
-      success: true,
-      user: {
-        id: user.id,
-        username: user.username,
-        fullnames: user.fullnames,
-      },
+    const response = await rawApi.post<TokenStatusResponse>('/auth/token-status', {
       token,
-      userId,
-    };
-  } catch (error) {
-    console.error('Error en login:', error);
-    return {
-      success: false,
-      error: 'No se pudo iniciar sesión. Intenta nuevamente.',
-    };
+    });
+
+    const data = response.data || {};
+
+    if (typeof data.valido === 'boolean') return data.valido;
+    if (typeof data.valid === 'boolean') return data.valid;
+    if (typeof data.activo === 'boolean') return data.activo;
+    if (typeof data.active === 'boolean') return data.active;
+    if (typeof data.expiro === 'boolean') return !data.expiro;
+    if (typeof data.expired === 'boolean') return !data.expired;
+
+    // Si el backend no devuelve una bandera explícita, HTTP 2xx se considera válido.
+    return true;
+  } catch {
+    return false;
   }
 };
 
-/**
- * Registra un nuevo usuario
- */
-export const register = async (credentials: RegisterCredentials): Promise<AuthResult> => {
+export const refreshAccessToken = async (
+  refreshToken: string
+): Promise<RefreshResponse | null> => {
+  if (!refreshToken?.trim()) {
+    return null;
+  }
+
   try {
-    const { username, password, fullnames } = credentials;
+    const response = await rawApi.post<RefreshResponse>('/auth/refresh', {
+      refresh_token: refreshToken,
+    });
 
-    if (!username.trim() || !password.trim() || !fullnames.trim()) {
-      return {
-        success: false,
-        error: 'Por favor completa todos los campos',
-      };
+    if (!response.data?.access_token) {
+      return null;
     }
 
-    // Verificar si el usuario ya existe
-    const existingUser = await executeQuery(
-      'SELECT * FROM users WHERE username = ? LIMIT 1',
-      [username.trim()]
-    );
-
-    if (existingUser.rows.length > 0) {
-      return {
-        success: false,
-        error: 'El nombre de usuario ya está en uso',
-      };
-    }
-
-    // Crear nuevo usuario
-    const insertResult = await executeQuery(
-      'INSERT INTO users (username, password, fullnames) VALUES (?, ?, ?)',
-      [username.trim(), password.trim(), fullnames.trim()]
-    );
-
-    if (!insertResult.insertId) {
-      return {
-        success: false,
-        error: 'No se pudo crear el usuario',
-      };
-    }
-
-    // Obtener el usuario recién creado
-    const newUserResult = await executeQuery(
-      'SELECT * FROM users WHERE id = ?',
-      [insertResult.insertId]
-    );
-
-    if (newUserResult.rows.length === 0) {
-      return {
-        success: false,
-        error: 'Usuario creado pero no se pudo obtener la información',
-      };
-    }
-
-    const user: User = newUserResult.rows.item(0);
-    const token = `token_${user.id}_${Date.now()}`;
-    const userId = user.id.toString();
-
-    return {
-      success: true,
-      user: {
-        id: user.id,
-        username: user.username,
-        fullnames: user.fullnames,
-      },
-      token,
-      userId,
-    };
-  } catch (error) {
-    console.error('Error en register:', error);
-    return {
-      success: false,
-      error: 'No se pudo registrar el usuario. Intenta nuevamente.',
-    };
+    return response.data;
+  } catch {
+    return null;
   }
 };
 

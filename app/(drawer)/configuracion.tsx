@@ -2,27 +2,27 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useThemeColor } from '@/hooks/use-theme-color';
-import { Empresa, getEmpresa, updateEmpresa } from '@/services/empresa';
-import { createUser, deleteUser, getAllUsers, updateUser } from '@/services/users';
-import { User } from '@/types/user';
+import { createEmpresa, Empresa, getEmpresa, updateEmpresa } from '@/services/empresa';
+import { createUser, deleteUser, getAllUsers, getRoles, updateUser } from '@/services/users';
+import { User, UserRole } from '@/types/user';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { Picker } from '@react-native-picker/picker';
 import React, { useEffect, useState } from 'react';
 import {
-  Alert,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  TextInput,
-  TouchableOpacity,
-  View,
+    Alert,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    Switch,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 type TabType = 'empresa' | 'usuarios';
 
 export default function ConfiguracionScreen() {
-  const router = useRouter();
   const [activeTab, setActiveTab] = useState<TabType>('empresa');
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -30,24 +30,24 @@ export default function ConfiguracionScreen() {
   // Estado para información de empresa
   const [empresa, setEmpresa] = useState<Empresa | null>(null);
   const [empresaForm, setEmpresaForm] = useState({
-    name: '',
+    nombre: '',
     rif: '',
-    address: '',
-    phone: '',
-    email: '',
-    website: '',
-    description: '',
+    direccion: '',
+    telefono: '',
+    descripcion: '',
   });
   const [savingEmpresa, setSavingEmpresa] = useState(false);
 
   // Estado para usuarios
   const [users, setUsers] = useState<User[]>([]);
+  const [roles, setRoles] = useState<UserRole[]>([]);
   const [showUserForm, setShowUserForm] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [userForm, setUserForm] = useState({
-    username: '',
-    password: '',
-    fullnames: '',
+    correo: '',
+    contrasena: '',
+    idRol: null as number | null,
+    activo: true,
   });
   const [savingUser, setSavingUser] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -83,13 +83,20 @@ export default function ConfiguracionScreen() {
       if (data) {
         setEmpresa(data);
         setEmpresaForm({
-          name: data.name || '',
+          nombre: data.nombre || '',
           rif: data.rif || '',
-          address: data.address || '',
-          phone: data.phone || '',
-          email: data.email || '',
-          website: data.website || '',
-          description: data.description || '',
+          direccion: data.direccion || '',
+          telefono: data.telefono || '',
+          descripcion: data.descripcion || '',
+        });
+      } else {
+        setEmpresa(null);
+        setEmpresaForm({
+          nombre: '',
+          rif: '',
+          direccion: '',
+          telefono: '',
+          descripcion: '',
         });
       }
     } catch (error) {
@@ -100,8 +107,9 @@ export default function ConfiguracionScreen() {
 
   const loadUsers = async () => {
     try {
-      const data = await getAllUsers();
-      setUsers(data);
+      const [usersData, rolesData] = await Promise.all([getAllUsers(), getRoles()]);
+      setUsers(usersData);
+      setRoles(rolesData);
     } catch (error) {
       console.error('Error al cargar usuarios:', error);
       Alert.alert('Error', 'No se pudieron cargar los usuarios');
@@ -114,23 +122,34 @@ export default function ConfiguracionScreen() {
   };
 
   const handleSaveEmpresa = async () => {
-    if (!empresaForm.name.trim()) {
+    if (!empresaForm.nombre.trim()) {
       Alert.alert('Error', 'El nombre de la empresa es requerido');
       return;
     }
 
     try {
       setSavingEmpresa(true);
-      await updateEmpresa({
-        name: empresaForm.name.trim() || null,
-        rif: empresaForm.rif.trim() || null,
-        address: empresaForm.address.trim() || null,
-        phone: empresaForm.phone.trim() || null,
-        email: empresaForm.email.trim() || null,
-        website: empresaForm.website.trim() || null,
-        description: empresaForm.description.trim() || null,
-      });
-      Alert.alert('Éxito', 'Información de la empresa actualizada correctamente');
+
+      if (empresa) {
+        await updateEmpresa(empresa.id || 1, {
+          nombre: empresaForm.nombre.trim() || null,
+          rif: empresaForm.rif.trim() || null,
+          direccion: empresaForm.direccion.trim() || null,
+          telefono: empresaForm.telefono.trim() || null,
+          descripcion: empresaForm.descripcion.trim() || null,
+        });
+        Alert.alert('Éxito', 'Información de la empresa actualizada correctamente');
+      } else {
+        await createEmpresa({
+          nombre: empresaForm.nombre.trim(),
+          rif: empresaForm.rif.trim() || null,
+          direccion: empresaForm.direccion.trim() || null,
+          telefono: empresaForm.telefono.trim() || null,
+          descripcion: empresaForm.descripcion.trim() || null,
+        });
+        Alert.alert('Éxito', 'Empresa creada correctamente');
+      }
+
       await loadEmpresa();
     } catch (error: any) {
       console.error('Error al guardar empresa:', error);
@@ -141,13 +160,18 @@ export default function ConfiguracionScreen() {
   };
 
   const handleSaveUser = async () => {
-    if (!userForm.username.trim() || !userForm.fullnames.trim()) {
-      Alert.alert('Error', 'Usuario y nombre completo son requeridos');
+    if (!userForm.correo.trim()) {
+      Alert.alert('Error', 'El correo es requerido');
       return;
     }
 
-    if (!editingUser && !userForm.password.trim()) {
-      Alert.alert('Error', 'La contraseña es requerida para nuevos usuarios');
+    if (!userForm.idRol) {
+      Alert.alert('Error', 'Debe seleccionar un rol');
+      return;
+    }
+
+    if (!userForm.contrasena.trim()) {
+      Alert.alert('Error', 'La contraseña es requerida');
       return;
     }
 
@@ -156,22 +180,24 @@ export default function ConfiguracionScreen() {
       if (editingUser) {
         await updateUser({
           id: editingUser.id,
-          username: userForm.username.trim(),
-          password: userForm.password.trim() || undefined,
-          fullnames: userForm.fullnames.trim(),
+          correo: userForm.correo.trim(),
+          contrasena: userForm.contrasena.trim(),
+          id_rol: userForm.idRol,
+          activo: userForm.activo,
         });
         Alert.alert('Éxito', 'Usuario actualizado correctamente');
       } else {
         await createUser({
-          username: userForm.username.trim(),
-          password: userForm.password.trim(),
-          fullnames: userForm.fullnames.trim(),
+          correo: userForm.correo.trim(),
+          contrasena: userForm.contrasena.trim(),
+          id_rol: userForm.idRol,
+          activo: userForm.activo,
         });
         Alert.alert('Éxito', 'Usuario creado correctamente');
       }
       setShowUserForm(false);
       setEditingUser(null);
-      setUserForm({ username: '', password: '', fullnames: '' });
+      setUserForm({ correo: '', contrasena: '', idRol: null, activo: true });
       await loadUsers();
     } catch (error: any) {
       console.error('Error al guardar usuario:', error);
@@ -184,9 +210,10 @@ export default function ConfiguracionScreen() {
   const handleEditUser = (user: User) => {
     setEditingUser(user);
     setUserForm({
-      username: user.username,
-      password: '',
-      fullnames: user.fullnames,
+      correo: user.correo,
+      contrasena: '',
+      idRol: user.id_rol,
+      activo: user.activo,
     });
     setShowUserForm(true);
   };
@@ -194,7 +221,7 @@ export default function ConfiguracionScreen() {
   const handleDeleteUser = (user: User) => {
     Alert.alert(
       'Eliminar usuario',
-      `¿Estás seguro de eliminar el usuario "${user.username}"?`,
+      `¿Estás seguro de eliminar el usuario "${user.correo}"?`,
       [
         { text: 'Cancelar', style: 'cancel' },
         {
@@ -216,7 +243,7 @@ export default function ConfiguracionScreen() {
 
   const handleNewUser = () => {
     setEditingUser(null);
-    setUserForm({ username: '', password: '', fullnames: '' });
+    setUserForm({ correo: '', contrasena: '', idRol: null, activo: true });
     setShowUserForm(true);
   };
 
@@ -277,6 +304,11 @@ export default function ConfiguracionScreen() {
             <ThemedText type="subtitle" style={styles.sectionTitle}>
               Información de la Empresa
             </ThemedText>
+            {!empresa && (
+              <ThemedText style={styles.infoText}>
+                Aún no hay empresa registrada. Completa el formulario para crearla.
+              </ThemedText>
+            )}
 
             <ThemedText style={styles.label}>Nombre de la Empresa *</ThemedText>
             <TextInput
@@ -290,8 +322,8 @@ export default function ConfiguracionScreen() {
               ]}
               placeholder="Nombre de la empresa"
               placeholderTextColor={isDark ? '#8E8E93' : '#999'}
-              value={empresaForm.name}
-              onChangeText={(text) => setEmpresaForm({ ...empresaForm, name: text })}
+              value={empresaForm.nombre}
+              onChangeText={(text) => setEmpresaForm({ ...empresaForm, nombre: text })}
             />
 
             <ThemedText style={styles.label}>RIF</ThemedText>
@@ -323,8 +355,8 @@ export default function ConfiguracionScreen() {
               ]}
               placeholder="Dirección"
               placeholderTextColor={isDark ? '#8E8E93' : '#999'}
-              value={empresaForm.address}
-              onChangeText={(text) => setEmpresaForm({ ...empresaForm, address: text })}
+              value={empresaForm.direccion}
+              onChangeText={(text) => setEmpresaForm({ ...empresaForm, direccion: text })}
               multiline
               numberOfLines={3}
             />
@@ -341,44 +373,9 @@ export default function ConfiguracionScreen() {
               ]}
               placeholder="Teléfono"
               placeholderTextColor={isDark ? '#8E8E93' : '#999'}
-              value={empresaForm.phone}
-              onChangeText={(text) => setEmpresaForm({ ...empresaForm, phone: text })}
+              value={empresaForm.telefono}
+              onChangeText={(text) => setEmpresaForm({ ...empresaForm, telefono: text })}
               keyboardType="phone-pad"
-            />
-
-            <ThemedText style={styles.label}>Email</ThemedText>
-            <TextInput
-              style={[
-                styles.input,
-                {
-                  backgroundColor: isDark ? '#2C2C2E' : '#fff',
-                  color: textColor,
-                  borderColor: isDark ? '#3A3A3C' : '#ddd',
-                },
-              ]}
-              placeholder="Email"
-              placeholderTextColor={isDark ? '#8E8E93' : '#999'}
-              value={empresaForm.email}
-              onChangeText={(text) => setEmpresaForm({ ...empresaForm, email: text })}
-              keyboardType="email-address"
-              autoCapitalize="none"
-            />
-
-            <ThemedText style={styles.label}>Sitio Web</ThemedText>
-            <TextInput
-              style={[
-                styles.input,
-                {
-                  backgroundColor: isDark ? '#2C2C2E' : '#fff',
-                  color: textColor,
-                  borderColor: isDark ? '#3A3A3C' : '#ddd',
-                },
-              ]}
-              placeholder="https://www.ejemplo.com"
-              placeholderTextColor={isDark ? '#8E8E93' : '#999'}
-              value={empresaForm.website}
-              onChangeText={(text) => setEmpresaForm({ ...empresaForm, website: text })}
-              autoCapitalize="none"
             />
 
             <ThemedText style={styles.label}>Descripción</ThemedText>
@@ -394,8 +391,8 @@ export default function ConfiguracionScreen() {
               ]}
               placeholder="Descripción de la empresa"
               placeholderTextColor={isDark ? '#8E8E93' : '#999'}
-              value={empresaForm.description}
-              onChangeText={(text) => setEmpresaForm({ ...empresaForm, description: text })}
+              value={empresaForm.descripcion}
+              onChangeText={(text) => setEmpresaForm({ ...empresaForm, descripcion: text })}
               multiline
               numberOfLines={4}
             />
@@ -409,7 +406,11 @@ export default function ConfiguracionScreen() {
               onPress={handleSaveEmpresa}
               disabled={savingEmpresa}>
               <ThemedText style={styles.saveButtonText}>
-                {savingEmpresa ? 'Guardando...' : 'Guardar Información'}
+                {savingEmpresa
+                  ? 'Guardando...'
+                  : empresa
+                    ? 'Guardar Información'
+                    : 'Crear Empresa'}
               </ThemedText>
             </TouchableOpacity>
           </ThemedView>
@@ -440,7 +441,7 @@ export default function ConfiguracionScreen() {
                   {editingUser ? 'Editar Usuario' : 'Nuevo Usuario'}
                 </ThemedText>
 
-                <ThemedText style={styles.label}>Usuario *</ThemedText>
+                <ThemedText style={styles.label}>Correo *</ThemedText>
                 <TextInput
                   style={[
                     styles.input,
@@ -450,15 +451,16 @@ export default function ConfiguracionScreen() {
                       borderColor: isDark ? '#3A3A3C' : '#ddd',
                     },
                   ]}
-                  placeholder="Nombre de usuario"
+                  placeholder="correo@dominio.com"
                   placeholderTextColor={isDark ? '#8E8E93' : '#999'}
-                  value={userForm.username}
-                  onChangeText={(text) => setUserForm({ ...userForm, username: text })}
+                  value={userForm.correo}
+                  onChangeText={(text) => setUserForm({ ...userForm, correo: text })}
+                  keyboardType="email-address"
                   autoCapitalize="none"
                 />
 
                 <ThemedText style={styles.label}>
-                  Contraseña {editingUser ? '(dejar vacío para no cambiar)' : '*'}
+                  Contraseña *
                 </ThemedText>
                 <View style={styles.passwordContainer}>
                   <TextInput
@@ -473,8 +475,8 @@ export default function ConfiguracionScreen() {
                     ]}
                     placeholder="Contraseña"
                     placeholderTextColor={isDark ? '#8E8E93' : '#999'}
-                    value={userForm.password}
-                    onChangeText={(text) => setUserForm({ ...userForm, password: text })}
+                    value={userForm.contrasena}
+                    onChangeText={(text) => setUserForm({ ...userForm, contrasena: text })}
                     secureTextEntry={!showPassword}
                   />
                   <TouchableOpacity
@@ -488,21 +490,35 @@ export default function ConfiguracionScreen() {
                   </TouchableOpacity>
                 </View>
 
-                <ThemedText style={styles.label}>Nombre Completo *</ThemedText>
-                <TextInput
+                <ThemedText style={styles.label}>Rol *</ThemedText>
+                <View
                   style={[
-                    styles.input,
+                    styles.pickerContainer,
                     {
                       backgroundColor: isDark ? '#1C1C1E' : '#F5F5F5',
-                      color: textColor,
                       borderColor: isDark ? '#3A3A3C' : '#ddd',
                     },
-                  ]}
-                  placeholder="Nombre completo"
-                  placeholderTextColor={isDark ? '#8E8E93' : '#999'}
-                  value={userForm.fullnames}
-                  onChangeText={(text) => setUserForm({ ...userForm, fullnames: text })}
-                />
+                  ]}>
+                  <Picker
+                    selectedValue={userForm.idRol}
+                    onValueChange={(value) => setUserForm({ ...userForm, idRol: value })}
+                    style={{ color: textColor }}>
+                    <Picker.Item label="Selecciona un rol" value={null} />
+                    {roles.map((role) => (
+                      <Picker.Item key={role.id} label={role.nombre} value={role.id} />
+                    ))}
+                  </Picker>
+                </View>
+
+                <View style={styles.switchContainer}>
+                  <ThemedText style={styles.label}>Activo</ThemedText>
+                  <Switch
+                    value={userForm.activo}
+                    onValueChange={(value) => setUserForm({ ...userForm, activo: value })}
+                    trackColor={{ false: '#767577', true: tintColor }}
+                    thumbColor="#fff"
+                  />
+                </View>
 
                 <View style={styles.formButtons}>
                   <TouchableOpacity
@@ -510,7 +526,7 @@ export default function ConfiguracionScreen() {
                     onPress={() => {
                       setShowUserForm(false);
                       setEditingUser(null);
-                      setUserForm({ username: '', password: '', fullnames: '' });
+                      setUserForm({ correo: '', contrasena: '', idRol: null, activo: true });
                     }}>
                     <ThemedText style={styles.cancelButtonText}>Cancelar</ThemedText>
                   </TouchableOpacity>
@@ -541,8 +557,13 @@ export default function ConfiguracionScreen() {
                   },
                 ]}>
                 <ThemedView style={styles.userInfo}>
-                  <ThemedText style={styles.userName}>{user.username}</ThemedText>
-                  <ThemedText style={styles.userFullname}>{user.fullnames}</ThemedText>
+                  <ThemedText style={styles.userName}>{user.correo}</ThemedText>
+                  <ThemedText style={styles.userFullname}>
+                    Rol: {user.rol?.nombre || `ID ${user.id_rol}`}
+                  </ThemedText>
+                  <ThemedText style={styles.userFullname}>
+                    Estado: {user.activo ? 'Activo' : 'Inactivo'}
+                  </ThemedText>
                 </ThemedView>
                 <ThemedView style={styles.userActions}>
                   <TouchableOpacity
@@ -622,6 +643,12 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     marginTop: 16,
   },
+  infoText: {
+    fontSize: 13,
+    opacity: 0.75,
+    marginTop: 6,
+    marginBottom: 8,
+  },
   input: {
     borderWidth: 1,
     borderRadius: 8,
@@ -680,6 +707,17 @@ const styles = StyleSheet.create({
   },
   formTitle: {
     marginBottom: 20,
+  },
+  pickerContainer: {
+    borderWidth: 1,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  switchContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 8,
   },
   passwordContainer: {
     position: 'relative',

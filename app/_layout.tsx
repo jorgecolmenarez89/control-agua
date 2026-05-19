@@ -8,7 +8,6 @@ import 'react-native-reanimated';
 import { ThemedView } from '@/components/themed-view';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { useDatabase } from '@/hooks/use-database';
 
 export const unstable_settings = {
   anchor: '(drawer)',
@@ -60,15 +59,6 @@ function RootLayoutNav() {
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
-  const { isInitialized, error } = useDatabase();
-
-  if (!isInitialized) {
-    return (
-      <ThemedView style={styles.loadingContainer}>
-        <ActivityIndicator size="large" />
-      </ThemedView>
-    );
-  }
 
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>

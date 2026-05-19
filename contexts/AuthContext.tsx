@@ -1,13 +1,15 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { getSession, isLoggedIn, clearSession, saveSession } from '@/services/sessionStorage';
-import { UserSession } from '@/services/sessionStorage';
-import { UserSessionData } from '@/types/user';
+import { LoginCredentials } from '@/services/auth';
+import { useAuthStore } from '@/store/auth-store';
+import { AuthUser } from '@/types/auth';
+import React, { createContext, ReactNode, useContext, useEffect } from 'react';
 
 interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
-  user: UserSessionData | null;
-  login: (session: UserSession) => Promise<void>;
+  user: AuthUser | null;
+  accessToken: string | null;
+  refreshToken: string | null;
+  login: (credentials: LoginCredentials) => Promise<void>;
   logout: () => Promise<void>;
   checkAuth: () => Promise<void>;
 }
@@ -15,57 +17,19 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-  const [user, setUser] = useState<UserSessionData | null>(null);
-
-  const checkAuth = async () => {
-    try {
-      setIsLoading(true);
-      const loggedIn = await isLoggedIn();
-      const session = await getSession();
-
-      if (loggedIn && session?.userData) {
-        setIsAuthenticated(true);
-        setUser(session.userData);
-      } else {
-        setIsAuthenticated(false);
-        setUser(null);
-      }
-    } catch (error) {
-      console.error('Error al verificar autenticación:', error);
-      setIsAuthenticated(false);
-      setUser(null);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const login = async (session: UserSession) => {
-    try {
-      await saveSession(session);
-      setIsAuthenticated(true);
-      setUser(session.userData || null);
-    } catch (error) {
-      console.error('Error al iniciar sesión:', error);
-      throw error;
-    }
-  };
-
-  const logout = async () => {
-    try {
-      await clearSession();
-      setIsAuthenticated(false);
-      setUser(null);
-    } catch (error) {
-      console.error('Error al cerrar sesión:', error);
-      throw error;
-    }
-  };
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const isLoading = useAuthStore((state) => state.isLoading);
+  const user = useAuthStore((state) => state.user);
+  const accessToken = useAuthStore((state) => state.accessToken);
+  const refreshToken = useAuthStore((state) => state.refreshToken);
+  const initializeAuth = useAuthStore((state) => state.initializeAuth);
+  const loginWithCredentials = useAuthStore((state) => state.loginWithCredentials);
+  const logout = useAuthStore((state) => state.logout);
+  const checkAuth = useAuthStore((state) => state.checkAuth);
 
   useEffect(() => {
-    checkAuth();
-  }, []);
+    initializeAuth();
+  }, [initializeAuth]);
 
   return (
     <AuthContext.Provider
@@ -73,7 +37,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         isAuthenticated,
         isLoading,
         user,
-        login,
+        accessToken,
+        refreshToken,
+        login: loginWithCredentials,
         logout,
         checkAuth,
       }}>

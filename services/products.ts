@@ -1,22 +1,86 @@
-import { executeQuery } from './database';
-import { Product, CreateProduct, UpdateProduct } from '@/types/product';
-import { hasProductInSales } from './sales';
+import { CreateProduct, Product, UpdateProduct } from '@/types/product';
+import api from './api';
+
+interface ApiProduct {
+  id: number;
+  nombre: string;
+  descripcion: string | null;
+  precio: string | number;
+  activo: boolean;
+}
+
+interface ApiProductPayload {
+  nombre?: string;
+  descripcion?: string | null;
+  precio?: number;
+  activo?: boolean;
+}
+
+const parseNumber = (value: string | number | null | undefined): number => {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const mapApiProductToProduct = (product: ApiProduct): Product => {
+  return {
+    id: product.id,
+    name: product.nombre,
+    description: product.descripcion ?? null,
+    price: parseNumber(product.precio),
+    active: product.activo ? 1 : 0,
+  };
+};
+
+const mapCreatePayload = (product: CreateProduct): ApiProductPayload => {
+  return {
+    nombre: product.name.trim(),
+    descripcion: product.description?.trim() || null,
+    precio: Number(product.price),
+    activo: product.active === 1,
+  };
+};
+
+const mapUpdatePayload = (product: UpdateProduct): ApiProductPayload => {
+  const payload: ApiProductPayload = {};
+
+  if (product.name !== undefined) {
+    payload.nombre = product.name.trim();
+  }
+
+  if (product.description !== undefined) {
+    payload.descripcion = product.description?.trim() || null;
+  }
+
+  if (product.price !== undefined) {
+    payload.precio = Number(product.price);
+  }
+
+  if (product.active !== undefined) {
+    payload.activo = product.active === 1;
+  }
+
+  return payload;
+};
 
 /**
  * Obtiene todos los productos
  */
-export const getAllProducts = async (): Promise<Product[]> => {
+export const getAllProducts = async (includeInactive = false): Promise<Product[]> => {
   try {
-    const result = await executeQuery(
-      'SELECT * FROM productos ORDER BY name ASC'
-    );
-    
-    const products: Product[] = [];
-    for (let i = 0; i < result.rows.length; i++) {
-      products.push(result.rows.item(i));
+    const response = await api.get<ApiProduct[]>('/productos');
+    const items = Array.isArray(response.data) ? response.data : [];
+
+    const mappedProducts = items.map(mapApiProductToProduct);
+
+    if (includeInactive) {
+      return mappedProducts;
     }
-    
-    return products;
+
+    return mappedProducts.filter((product) => product.active === 1);
   } catch (error) {
     console.error('Error al obtener productos:', error);
     throw error;
@@ -28,19 +92,17 @@ export const getAllProducts = async (): Promise<Product[]> => {
  */
 export const getProductById = async (id: number): Promise<Product | null> => {
   try {
-    const result = await executeQuery(
-      'SELECT * FROM productos WHERE id = ?',
-      [id]
-    );
-    
-    if (result.rows.length === 0) {
-      return null;
-    }
-    
-    return result.rows.item(0);
+    const response = await api.get<ApiProduct>(`/productos/${id}`);
+    return mapApiProductToProduct(response.data);
   } catch (error) {
-    console.error('Error al obtener producto:', error);
-    throw error;
+    // Fallback para backends que no exponen GET por id
+    try {
+      const products = await getAllProducts(true);
+      return products.find((product) => product.id === id) || null;
+    } catch {
+      console.error('Error al obtener producto:', error);
+      throw error;
+    }
   }
 };
 
@@ -49,21 +111,8 @@ export const getProductById = async (id: number): Promise<Product | null> => {
  */
 export const createProduct = async (product: CreateProduct): Promise<Product> => {
   try {
-    const result = await executeQuery(
-      'INSERT INTO productos (name, description, price, active) VALUES (?, ?, ?, ?)',
-      [product.name, product.description || null, product.price, product.active]
-    );
-    
-    if (!result.insertId) {
-      throw new Error('No se pudo crear el producto');
-    }
-    
-    const newProduct = await getProductById(Number(result.insertId));
-    if (!newProduct) {
-      throw new Error('Producto creado pero no se pudo obtener');
-    }
-    
-    return newProduct;
+    const response = await api.post<ApiProduct>('/productos', mapCreatePayload(product));
+    return mapApiProductToProduct(response.data);
   } catch (error) {
     console.error('Error al crear producto:', error);
     throw error;
@@ -75,49 +124,16 @@ export const createProduct = async (product: CreateProduct): Promise<Product> =>
  */
 export const updateProduct = async (product: UpdateProduct): Promise<Product> => {
   try {
-    const existingProduct = await getProductById(product.id);
-    if (!existingProduct) {
-      throw new Error('Producto no encontrado');
+    const payload = mapUpdatePayload(product);
+
+    let response;
+    try {
+      response = await api.put<ApiProduct>(`/productos/${product.id}`, payload);
+    } catch {
+      response = await api.patch<ApiProduct>(`/productos/${product.id}`, payload);
     }
-    
-    const updates: string[] = [];
-    const values: any[] = [];
-    
-    if (product.name !== undefined) {
-      updates.push('name = ?');
-      values.push(product.name);
-    }
-    if (product.description !== undefined) {
-      updates.push('description = ?');
-      values.push(product.description || null);
-    }
-    if (product.price !== undefined) {
-      updates.push('price = ?');
-      values.push(product.price);
-    }
-    if (product.active !== undefined) {
-      updates.push('active = ?');
-      values.push(product.active);
-    }
-    
-    if (updates.length === 0) {
-      return existingProduct;
-    }
-    
-    updates.push('updated_at = CURRENT_TIMESTAMP');
-    values.push(product.id);
-    
-    await executeQuery(
-      `UPDATE productos SET ${updates.join(', ')} WHERE id = ?`,
-      values
-    );
-    
-    const updatedProduct = await getProductById(product.id);
-    if (!updatedProduct) {
-      throw new Error('Producto actualizado pero no se pudo obtener');
-    }
-    
-    return updatedProduct;
+
+    return mapApiProductToProduct(response.data);
   } catch (error) {
     console.error('Error al actualizar producto:', error);
     throw error;
@@ -126,20 +142,13 @@ export const updateProduct = async (product: UpdateProduct): Promise<Product> =>
 
 /**
  * Elimina un producto (soft delete - marca como inactivo)
- * Valida que el producto no esté siendo usado en ninguna venta
  */
 export const deleteProduct = async (id: number): Promise<void> => {
   try {
-    // Verificar si el producto está en alguna venta
-    const isInSales = await hasProductInSales(id);
-    if (isInSales) {
-      throw new Error('No se puede eliminar el producto porque está siendo usado en una o más ventas');
-    }
-    
-    await executeQuery(
-      'UPDATE productos SET active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      [id]
-    );
+    await updateProduct({
+      id,
+      active: 0,
+    });
   } catch (error) {
     console.error('Error al eliminar producto:', error);
     throw error;
@@ -151,10 +160,9 @@ export const deleteProduct = async (id: number): Promise<void> => {
  */
 export const hardDeleteProduct = async (id: number): Promise<void> => {
   try {
-    await executeQuery('DELETE FROM productos WHERE id = ?', [id]);
+    await api.delete(`/productos/${id}`);
   } catch (error) {
     console.error('Error al eliminar producto permanentemente:', error);
     throw error;
   }
 };
-

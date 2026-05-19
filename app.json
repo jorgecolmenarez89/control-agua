@@ -15,6 +15,10 @@
     "android": {
       "package": "com.controlagua.app",
       "versionCode": 2,
+      "permissions": [
+        "INTERNET"
+      ],
+      "usesCleartextTraffic": true,
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",

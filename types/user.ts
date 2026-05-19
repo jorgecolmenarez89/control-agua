@@ -1,11 +1,17 @@
 /**
  * Interfaz para el usuario de la aplicación
  */
+export interface UserRole {
+  id: number;
+  nombre: string;
+}
+
 export interface User {
   id: number;
-  username: string;
-  password: string;
-  fullnames: string;
+  correo: string;
+  id_rol: number;
+  activo: boolean;
+  rol?: UserRole;
 }
 
 /**
@@ -13,7 +19,9 @@ export interface User {
  */
 export interface UserSessionData {
   id: number;
-  username: string;
-  fullnames: string;
+  correo: string;
+  id_rol: number;
+  activo: boolean;
+  rol?: UserRole;
 }
 

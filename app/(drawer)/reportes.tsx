@@ -2,137 +2,187 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useThemeColor } from '@/hooks/use-theme-color';
-import { getSalesPaginated, getSaleWithRelations, SalesFilter } from '@/services/sales';
-import { Sale } from '@/types/sale';
+import {
+    getReporteVentasHoy,
+    getReporteVentasMesActual,
+    getReporteVentasRango,
+    getReporteVentasSemanaActual,
+    ReporteVenta,
+    ReporteVentas,
+} from '@/services/reportes';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Picker } from '@react-native-picker/picker';
-import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Platform,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Platform,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    TouchableOpacity,
+    View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
 type FilterType = 'day' | 'week' | 'month' | 'range';
 
+const EMPTY_REPORTE: ReporteVentas = {
+  cantidadVentas: 0,
+  totalBruto: 0,
+  totalDescuento: 0,
+  totalNeto: 0,
+  ventas: [],
+  filtro: {
+    tipo: '',
+    fechaInicio: '',
+    fechaFin: '',
+  },
+};
+
 export default function ReportesScreen() {
-  const router = useRouter();
-  const [sales, setSales] = useState<Sale[]>([]);
+  const [reporte, setReporte] = useState<ReporteVentas>(EMPTY_REPORTE);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
-  const [currentPage, setCurrentPage] = useState(0);
-  const [total, setTotal] = useState(0);
-  const [totalAmount, setTotalAmount] = useState(0);
-  
+
   const [filterType, setFilterType] = useState<FilterType>('day');
   const [startDate, setStartDate] = useState<Date>(new Date());
   const [endDate, setEndDate] = useState<Date>(new Date());
   const [showStartDatePicker, setShowStartDatePicker] = useState(false);
   const [showEndDatePicker, setShowEndDatePicker] = useState(false);
-  const [selectedSale, setSelectedSale] = useState<any>(null);
-  const [showDetail, setShowDetail] = useState(false);
 
   const colorScheme = useColorScheme();
   const textColor = useThemeColor({}, 'text');
   const tintColor = useThemeColor({}, 'tint');
   const isDark = colorScheme === 'dark';
 
-  const PAGE_SIZE = 20;
-
   useEffect(() => {
-    loadSales(true);
-  }, [filterType, startDate, endDate]);
+    const today = new Date();
+    loadReportes('day', today, today);
+  }, []);
 
-  const loadSales = async (reset: boolean = false) => {
+  const getPresetRange = (type: Exclude<FilterType, 'range'>) => {
+    const today = new Date();
+
+    if (type === 'day') {
+      return { startDate: today, endDate: today };
+    }
+
+    if (type === 'week') {
+      const dayOfWeek = today.getDay();
+      const diff = today.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+      const monday = new Date(today);
+      monday.setDate(monday.getDate() - diff + 1);
+      return { startDate: monday, endDate: today };
+    }
+
+    const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+    return { startDate: firstDay, endDate: today };
+  };
+
+  const formatDateForQuery = (date: Date): string => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+
+    return `${year}-${month}-${day}`;
+  };
+
+  const fetchReportByFilter = async (
+    type: FilterType,
+    rangeStart: Date,
+    rangeEnd: Date
+  ): Promise<ReporteVentas> => {
+    if (type === 'day') {
+      return getReporteVentasHoy();
+    }
+
+    if (type === 'week') {
+      return getReporteVentasSemanaActual();
+    }
+
+    if (type === 'month') {
+      return getReporteVentasMesActual();
+    }
+
+    return getReporteVentasRango(
+      formatDateForQuery(rangeStart),
+      formatDateForQuery(rangeEnd)
+    );
+  };
+
+  const loadReportes = async (
+    type: FilterType,
+    rangeStart: Date,
+    rangeEnd: Date,
+    isRefresh: boolean = false
+  ) => {
     try {
-      if (reset) {
+      if (!isRefresh) {
         setIsLoading(true);
-        setCurrentPage(0);
-        setSales([]);
-        setHasMore(true);
-      } else {
-        setLoadingMore(true);
       }
 
-      const filter: SalesFilter = {
-        type: filterType,
-      };
-
-      if (filterType === 'range') {
-        // Convertir fechas a formato local sin UTC para evitar problemas de zona horaria
-        const startStr = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}-${String(startDate.getDate()).padStart(2, '0')} 00:00:00.000`;
-        const endStr = `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, '0')}-${String(endDate.getDate()).padStart(2, '0')} 23:59:59.999`;
-        filter.startDate = startStr;
-        filter.endDate = endStr;
-      }
-
-      const offset = reset ? 0 : currentPage * PAGE_SIZE;
-      const result = await getSalesPaginated(filter, PAGE_SIZE, offset);
-
-      if (reset) {
-        setSales(result.sales);
-      } else {
-        setSales([...sales, ...result.sales]);
-      }
-
-      setTotal(result.total);
-      setTotalAmount(result.totalAmount || 0);
-      setHasMore(result.sales.length === PAGE_SIZE);
-      setCurrentPage(reset ? 1 : currentPage + 1);
+      const data = await fetchReportByFilter(type, rangeStart, rangeEnd);
+      setReporte(data);
     } catch (error) {
-      console.error('Error al cargar ventas:', error);
-      Alert.alert('Error', 'No se pudieron cargar las ventas');
+      console.error('Error al cargar reporte de ventas:', error);
+      Alert.alert('Error', 'No se pudieron cargar los reportes');
     } finally {
       setIsLoading(false);
-      setLoadingMore(false);
       setRefreshing(false);
     }
   };
 
   const onRefresh = () => {
     setRefreshing(true);
-    loadSales(true);
-  };
-
-  const loadMore = () => {
-    if (!loadingMore && hasMore) {
-      loadSales(false);
+    if (filterType === 'range') {
+      loadReportes('range', startDate, endDate, true);
+      return;
     }
+
+    const preset = getPresetRange(filterType);
+    loadReportes(filterType, preset.startDate, preset.endDate, true);
   };
 
   const handleFilterChange = (type: FilterType) => {
     setFilterType(type);
     if (type === 'day') {
-      const today = new Date();
-      setStartDate(today);
-      setEndDate(today);
+      const preset = getPresetRange(type);
+      setStartDate(preset.startDate);
+      setEndDate(preset.endDate);
+      loadReportes(type, preset.startDate, preset.endDate);
     } else if (type === 'week') {
-      const today = new Date();
-      const dayOfWeek = today.getDay();
-      const diff = today.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
-      const monday = new Date(today);
-      monday.setDate(monday.getDate() - diff + 1);
-      setStartDate(monday);
-      setEndDate(today);
+      const preset = getPresetRange(type);
+      setStartDate(preset.startDate);
+      setEndDate(preset.endDate);
+      loadReportes(type, preset.startDate, preset.endDate);
     } else if (type === 'month') {
-      const today = new Date();
-      const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
-      setStartDate(firstDay);
-      setEndDate(today);
+      const preset = getPresetRange(type);
+      setStartDate(preset.startDate);
+      setEndDate(preset.endDate);
+      loadReportes(type, preset.startDate, preset.endDate);
     }
   };
 
+  const handleApplyRange = () => {
+    if (startDate > endDate) {
+      Alert.alert('Error', 'La fecha inicial no puede ser mayor que la fecha final');
+      return;
+    }
+
+    loadReportes('range', startDate, endDate);
+  };
+
   const formatDate = (date: Date): string => {
+    return date.toLocaleDateString('es-ES', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+  };
+
+  const formatDateOnly = (dateString: string): string => {
+    const date = new Date(dateString);
     return date.toLocaleDateString('es-ES', {
       year: 'numeric',
       month: '2-digit',
@@ -147,50 +197,11 @@ export default function ReportesScreen() {
     }).format(amount)}`;
   };
 
-  const formatCurrencyShort = (amount: number): string => {
-    return new Intl.NumberFormat('es-ES', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(amount);
-  };
-
-  const formatDateTime = (dateString: string): string => {
-    const date = new Date(dateString);
-    return date.toLocaleString('es-ES', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  };
-
-  const formatDateOnly = (dateString: string): string => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('es-ES', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    });
-  };
-
-  const handleSalePress = async (sale: Sale) => {
-    try {
-      const saleDetail = await getSaleWithRelations(sale.id);
-      if (saleDetail) {
-        setSelectedSale(saleDetail);
-        setShowDetail(true);
-      }
-    } catch (error) {
-      console.error('Error al cargar detalle:', error);
-      Alert.alert('Error', 'No se pudo cargar el detalle de la venta');
-    }
-  };
-
   const onStartDateChange = (event: any, selectedDate?: Date) => {
     if (Platform.OS === 'android') {
       setShowStartDatePicker(false);
     }
+
     if (selectedDate) {
       setStartDate(selectedDate);
     }
@@ -200,125 +211,45 @@ export default function ReportesScreen() {
     if (Platform.OS === 'android') {
       setShowEndDatePicker(false);
     }
+
     if (selectedDate) {
       setEndDate(selectedDate);
     }
   };
 
-  if (showDetail && selectedSale) {
+  const renderSaleCard = (sale: ReporteVenta) => {
     return (
-      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-        <ThemedView style={styles.detailHeader}>
-          <TouchableOpacity
-            onPress={() => setShowDetail(false)}
-            style={styles.backButton}>
-            <Ionicons name="arrow-back" size={24} color={textColor} />
-          </TouchableOpacity>
-          <ThemedText type="title" style={styles.detailTitle}>
-            Detalle de Venta
-          </ThemedText>
+      <ThemedView
+        key={sale.id}
+        style={[
+          styles.saleCard,
+          {
+            backgroundColor: isDark ? '#2C2C2E' : '#fff',
+            borderColor: isDark ? '#3A3A3C' : '#ddd',
+          },
+        ]}>
+        <ThemedView style={styles.saleCardHeader}>
+          <ThemedText style={[styles.saleNumber, { color: tintColor }]}>#{sale.numero}</ThemedText>
+          <ThemedText style={styles.saleDate}>{formatDateOnly(sale.fecha)}</ThemedText>
         </ThemedView>
 
-        <ScrollView 
-          style={styles.detailContent}
-          contentContainerStyle={styles.detailContentContainer}>
-          <ThemedView
-            style={[
-              styles.detailCard,
-              {
-                backgroundColor: isDark ? '#2C2C2E' : '#fff',
-                borderColor: isDark ? '#3A3A3C' : '#ddd',
-              },
-            ]}>
-            <ThemedView style={styles.detailRow}>
-              <ThemedText style={styles.detailLabel}>ID:</ThemedText>
-              <ThemedText style={styles.detailValue}>#{selectedSale.id}</ThemedText>
-            </ThemedView>
-
-            <ThemedView style={styles.detailRow}>
-              <ThemedText style={styles.detailLabel}>Fecha de Venta:</ThemedText>
-              <ThemedText style={styles.detailValue}>
-                {selectedSale.sale_date
-                  ? formatDateTime(selectedSale.sale_date)
-                  : formatDateTime(selectedSale.created_at)}
-              </ThemedText>
-            </ThemedView>
-
-            {selectedSale.reference && (
-              <ThemedView style={styles.detailRow}>
-                <ThemedText style={styles.detailLabel}>Referencia:</ThemedText>
-                <ThemedText style={styles.detailValue}>{selectedSale.reference}</ThemedText>
-              </ThemedView>
-            )}
-
-            <ThemedView style={styles.detailSection}>
-              <ThemedText style={styles.detailSectionTitle}>Producto</ThemedText>
-              <ThemedView style={styles.detailRow}>
-                <ThemedText style={styles.detailLabel}>Nombre:</ThemedText>
-                <ThemedText style={styles.detailValue}>
-                  {selectedSale.product?.name || 'N/A'}
-                </ThemedText>
-              </ThemedView>
-              {selectedSale.product?.description && (
-                <ThemedView style={styles.detailRow}>
-                  <ThemedText style={styles.detailLabel}>Descripción:</ThemedText>
-                  <ThemedText style={styles.detailValue}>
-                    {selectedSale.product.description}
-                  </ThemedText>
-                </ThemedView>
-              )}
-              <ThemedView style={styles.detailRow}>
-                <ThemedText style={styles.detailLabel}>Precio Unitario:</ThemedText>
-                <ThemedText style={styles.detailValue}>
-                  {formatCurrency(selectedSale.product?.price || 0)}
-                </ThemedText>
-              </ThemedView>
-            </ThemedView>
-
-            <ThemedView style={styles.detailSection}>
-              <ThemedText style={styles.detailSectionTitle}>Venta</ThemedText>
-              <ThemedView style={styles.detailRow}>
-                <ThemedText style={styles.detailLabel}>Cantidad:</ThemedText>
-                <ThemedText style={styles.detailValue}>{selectedSale.quantity}</ThemedText>
-              </ThemedView>
-              <ThemedView style={styles.detailRow}>
-                <ThemedText style={styles.detailLabel}>Precio Real:</ThemedText>
-                <ThemedText style={styles.detailValue}>
-                  {formatCurrency(selectedSale.price_real)}
-                </ThemedText>
-              </ThemedView>
-              <ThemedView style={styles.detailRow}>
-                <ThemedText style={[styles.detailLabel, { fontWeight: 'bold' }]}>
-                  Total:
-                </ThemedText>
-                <ThemedText style={[styles.detailValue, { color: tintColor, fontWeight: 'bold' }]}>
-                  {formatCurrency(selectedSale.total_price)}
-                </ThemedText>
-              </ThemedView>
-            </ThemedView>
-
-            <ThemedView style={styles.detailSection}>
-              <ThemedText style={styles.detailSectionTitle}>Tipo de Pago</ThemedText>
-              <ThemedView style={styles.detailRow}>
-                <ThemedText style={styles.detailLabel}>Nombre:</ThemedText>
-                <ThemedText style={styles.detailValue}>
-                  {selectedSale.tipo_pago?.name || 'N/A'}
-                </ThemedText>
-              </ThemedView>
-              {selectedSale.tipo_pago?.description && (
-                <ThemedView style={styles.detailRow}>
-                  <ThemedText style={styles.detailLabel}>Descripción:</ThemedText>
-                  <ThemedText style={styles.detailValue}>
-                    {selectedSale.tipo_pago.description}
-                  </ThemedText>
-                </ThemedView>
-              )}
-            </ThemedView>
-          </ThemedView>
-        </ScrollView>
-      </SafeAreaView>
+        <ThemedView style={styles.saleTotalsRow}>
+          <ThemedText style={styles.saleLabel}>Bruto:</ThemedText>
+          <ThemedText style={styles.saleValue}>{formatCurrency(sale.totalBruto)}</ThemedText>
+        </ThemedView>
+        <ThemedView style={styles.saleTotalsRow}>
+          <ThemedText style={styles.saleLabel}>Descuento:</ThemedText>
+          <ThemedText style={styles.saleValue}>{formatCurrency(sale.totalDescuento)}</ThemedText>
+        </ThemedView>
+        <ThemedView style={[styles.saleTotalsRow, styles.saleTotalsNetRow]}>
+          <ThemedText style={[styles.saleLabel, styles.saleNetLabel]}>Neto:</ThemedText>
+          <ThemedText style={[styles.saleNetValue, { color: tintColor }]}> 
+            {formatCurrency(sale.totalNeto)}
+          </ThemedText>
+        </ThemedView>
+      </ThemedView>
     );
-  }
+  };
 
   return (
     <ThemedView style={styles.container}>
@@ -327,11 +258,13 @@ export default function ReportesScreen() {
           Reportes
         </ThemedText>
         <ThemedView style={styles.subtitleContainer}>
-          <ThemedText style={styles.subtitle}>
-            Total: {total} ventas
-          </ThemedText>
-          <ThemedText style={[styles.subtitle, { fontWeight: '600' }]}>
-            | Bs {formatCurrencyShort(totalAmount)}
+          <ThemedText style={styles.subtitle}>Total: {reporte.cantidadVentas} ventas</ThemedText>
+          <ThemedText style={styles.subtitle}>| Bruto: {formatCurrency(reporte.totalBruto)}</ThemedText>
+        </ThemedView>
+        <ThemedView style={styles.subtitleContainer}>
+          <ThemedText style={styles.subtitle}>Descuento: {formatCurrency(reporte.totalDescuento)}</ThemedText>
+          <ThemedText style={[styles.subtitle, { fontWeight: '700' }]}> 
+            | Neto: {formatCurrency(reporte.totalNeto)}
           </ThemedText>
         </ThemedView>
       </ThemedView>
@@ -377,9 +310,7 @@ export default function ReportesScreen() {
                   },
                 ]}
                 onPress={() => setShowStartDatePicker(true)}>
-                <ThemedText style={{ color: textColor }}>
-                  {formatDate(startDate)}
-                </ThemedText>
+                <ThemedText style={{ color: textColor }}>{formatDate(startDate)}</ThemedText>
               </TouchableOpacity>
             </View>
 
@@ -394,9 +325,7 @@ export default function ReportesScreen() {
                   },
                 ]}
                 onPress={() => setShowEndDatePicker(true)}>
-                <ThemedText style={{ color: textColor }}>
-                  {formatDate(endDate)}
-                </ThemedText>
+                <ThemedText style={{ color: textColor }}>{formatDate(endDate)}</ThemedText>
               </TouchableOpacity>
             </View>
           </View>
@@ -435,6 +364,14 @@ export default function ReportesScreen() {
             </TouchableOpacity>
           </View>
         )}
+
+        {filterType === 'range' && (
+          <TouchableOpacity
+            style={[styles.applyButton, { backgroundColor: tintColor }]}
+            onPress={handleApplyRange}>
+            <ThemedText style={styles.applyButtonText}>Aplicar rango</ThemedText>
+          </TouchableOpacity>
+        )}
       </ThemedView>
 
       {isLoading ? (
@@ -442,81 +379,20 @@ export default function ReportesScreen() {
           <ActivityIndicator size="large" color={tintColor} />
           <ThemedText style={styles.loadingText}>Cargando ventas...</ThemedText>
         </ThemedView>
-      ) : sales.length === 0 ? (
-        <ThemedView style={styles.emptyContainer}>
-          <Ionicons name="document-text-outline" size={64} color={textColor} opacity={0.3} />
-          <ThemedText style={styles.emptyText}>No hay ventas para mostrar</ThemedText>
-        </ThemedView>
+      ) : reporte.ventas.length === 0 ? (
+        <ScrollView
+          style={styles.scrollView}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
+          <ThemedView style={styles.emptyContainer}>
+            <Ionicons name="document-text-outline" size={64} color={textColor} opacity={0.3} />
+            <ThemedText style={styles.emptyText}>No hay ventas para mostrar</ThemedText>
+          </ThemedView>
+        </ScrollView>
       ) : (
         <ScrollView
           style={styles.scrollView}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-          onScroll={({ nativeEvent }) => {
-            const { layoutMeasurement, contentOffset, contentSize } = nativeEvent;
-            const paddingToBottom = 20;
-            if (
-              layoutMeasurement.height + contentOffset.y >=
-              contentSize.height - paddingToBottom
-            ) {
-              loadMore();
-            }
-          }}
-          scrollEventThrottle={400}>
-          {sales.map((sale) => (
-            <TouchableOpacity
-              key={sale.id}
-              style={[
-                styles.saleCard,
-                {
-                  backgroundColor: isDark ? '#2C2C2E' : '#fff',
-                  borderColor: isDark ? '#3A3A3C' : '#ddd',
-                },
-              ]}
-              onPress={() => handleSalePress(sale)}>
-              <ThemedView style={styles.saleCardHeader}>
-                <ThemedText style={[styles.saleId, { color: tintColor }]}>
-                  {sale.tipo_pago_name || 'Sin tipo de pago'}
-                </ThemedText>
-                <ThemedText style={styles.saleDate}>
-                  {sale.sale_date
-                    ? formatDateOnly(sale.sale_date)
-                    : formatDateOnly(sale.created_at)}
-                </ThemedText>
-              </ThemedView>
-              <ThemedView style={styles.saleCardBody}>
-                <ThemedText style={styles.saleTotal}>
-                  {formatCurrency(sale.total_price)}
-                </ThemedText>
-                <ThemedText style={styles.saleQuantity}>
-                  Cantidad: {sale.quantity}
-                </ThemedText>
-              </ThemedView>
-              {sale.reference && (
-                <ThemedText style={styles.saleReference}>
-                  Ref: {sale.reference}
-                </ThemedText>
-              )}
-              <Ionicons
-                name="chevron-forward"
-                size={20}
-                color={textColor}
-                style={styles.chevron}
-              />
-            </TouchableOpacity>
-          ))}
-
-          {loadingMore && (
-            <ThemedView style={styles.loadingMoreContainer}>
-              <ActivityIndicator size="small" color={tintColor} />
-              <ThemedText style={styles.loadingMoreText}>Cargando más...</ThemedText>
-            </ThemedView>
-          )}
-
-          {!hasMore && sales.length > 0 && (
-            <ThemedView style={styles.endContainer}>
-              <ThemedText style={styles.endText}>No hay más ventas</ThemedText>
-            </ThemedView>
-          )}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
+          {reporte.ventas.map(renderSaleCard)}
         </ScrollView>
       )}
     </ThemedView>
@@ -538,6 +414,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
     alignItems: 'center',
+    flexWrap: 'wrap',
   },
   subtitle: {
     fontSize: 14,
@@ -595,6 +472,17 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+  applyButton: {
+    marginTop: 12,
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  applyButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
   scrollView: {
     flex: 1,
   },
@@ -604,49 +492,48 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 12,
     borderWidth: 1,
-    position: 'relative',
   },
   saleCardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 8,
-    paddingRight: 30,
   },
-  saleId: {
-    fontSize: 18,
-    fontWeight: 'bold',
+  saleNumber: {
+    fontSize: 16,
+    fontWeight: '700',
   },
   saleDate: {
     fontSize: 12,
-    opacity: 0.6,
-    flex: 1,
-    textAlign: 'right',
+    opacity: 0.65,
   },
-  saleCardBody: {
+  saleTotalsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 4,
+    paddingVertical: 4,
   },
-  saleTotal: {
-    fontSize: 20,
-    fontWeight: 'bold',
+  saleLabel: {
+    fontSize: 13,
+    opacity: 0.75,
   },
-  saleQuantity: {
+  saleValue: {
     fontSize: 14,
-    opacity: 0.7,
+    fontWeight: '500',
   },
-  saleReference: {
-    fontSize: 12,
-    opacity: 0.6,
+  saleTotalsNetRow: {
     marginTop: 4,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(0,0,0,0.08)',
+    paddingTop: 8,
   },
-  chevron: {
-    position: 'absolute',
-    right: 16,
-    top: '50%',
-    marginTop: -10,
+  saleNetLabel: {
+    fontWeight: '700',
+    opacity: 0.9,
+  },
+  saleNetValue: {
+    fontSize: 16,
+    fontWeight: '700',
   },
   loadingContainer: {
     flex: 1,
@@ -664,85 +551,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 40,
+    minHeight: 320,
   },
   emptyText: {
     marginTop: 16,
     fontSize: 16,
     opacity: 0.7,
     textAlign: 'center',
-  },
-  loadingMoreContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-    gap: 8,
-  },
-  loadingMoreText: {
-    fontSize: 14,
-    opacity: 0.7,
-  },
-  endContainer: {
-    padding: 20,
-    alignItems: 'center',
-  },
-  endText: {
-    fontSize: 14,
-    opacity: 0.5,
-  },
-  detailHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 20,
-    paddingTop: 10,
-    gap: 12,
-  },
-  backButton: {
-    padding: 8,
-  },
-  detailTitle: {
-    flex: 1,
-  },
-  detailContent: {
-    flex: 1,
-  },
-  detailContentContainer: {
-    padding: 20,
-    paddingBottom: 40,
-  },
-  detailCard: {
-    padding: 20,
-    paddingBottom: 20,
-    borderRadius: 12,
-    borderWidth: 1,
-  },
-  detailRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(0,0,0,0.1)',
-  },
-  detailLabel: {
-    fontSize: 14,
-    opacity: 0.7,
-    flex: 1,
-  },
-  detailValue: {
-    fontSize: 14,
-    fontWeight: '600',
-    flex: 1,
-    textAlign: 'right',
-  },
-  detailSection: {
-    marginTop: 20,
-    paddingTop: 20,
-    borderTopWidth: 2,
-    borderTopColor: 'rgba(0,0,0,0.1)',
-  },
-  detailSectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 12,
   },
 });
